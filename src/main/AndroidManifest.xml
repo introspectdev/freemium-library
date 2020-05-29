@@ -1,0 +1,9 @@
+<!--
+  ~ Copyright (c) 2020. Jason Burgess
+  -->
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="ml.introspectsoft.freemium_library">
+
+    /
+</manifest>
