@@ -4,12 +4,11 @@
 
 package ml.introspectsoft.freemium_library
 
-import android.app.Activity
 import android.content.Context
-import android.util.Log
 import com.android.billingclient.api.*
+import timber.log.Timber
 
-class FreemiumHelper(private val context: Context, private val premiumSku: String) :
+class FreemiumHelper(context: Context, private val premiumSku: String) :
     PurchasesUpdatedListener,
     SkuDetailsResponseListener {
     private var billingClient: BillingClient =
@@ -23,6 +22,12 @@ class FreemiumHelper(private val context: Context, private val premiumSku: Strin
 
     // From our check if it's a premium version or not. Just saying no for now until we get the rest working.
     val isPremium get() = false
+
+    init {
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
+    }
 
     private fun connect(callback: (BillingResult?) -> Unit) {
         if (!billingClient.isReady) {
@@ -44,43 +49,46 @@ class FreemiumHelper(private val context: Context, private val premiumSku: Strin
         params.setSkusList(skuList).setType(BillingClient.SkuType.INAPP)
         billingClient.querySkuDetailsAsync(params.build(), this)
     }
-
+/*
     fun purchasePro(activity: Activity) {
         //connect()
         // Retrieve a value for "skuDetails" by calling querySkuDetailsAsync().
         val flowParams = BillingFlowParams.newBuilder()
             .setSkuDetails(premiumSkuDetails)
             .build()
-        val responseCode = billingClient.launchBillingFlow(activity, flowParams)
+        //val responseCode = billingClient.launchBillingFlow(activity, flowParams)
     }
-
+*/
     private fun setStates(billingResult: BillingResult?) {
         when (billingResult?.responseCode) {
             BillingClient.BillingResponseCode.OK -> {
-                Log.d("BILLING", "Connected")
+                Timber.v("Billing connected")
             }
             BillingClient.BillingResponseCode.BILLING_UNAVAILABLE -> {
-                Log.d("BILLING", "BILLING_UNAVAILABLE")
+                Timber.v("Billing unavailable on this device.")
                 // Play services are unavailable on the device
                 isAvailable = false
             }
             BillingClient.BillingResponseCode.SERVICE_UNAVAILABLE -> {
-                Log.d("BILLING", "SERVICE_UNAVAILABLE")
+                Timber.w("Billing service unavailable")
             }
             BillingClient.BillingResponseCode.SERVICE_TIMEOUT -> {
-                Log.d("BILLING", "SERVICE_TIMEOUT")
+                Timber.w("Billing service timeout")
             }
             BillingClient.BillingResponseCode.SERVICE_DISCONNECTED -> {
-                Log.d("BILLING", "SERVICE_DISCONNECTED")
+                Timber.v("Billing service disconnected")
             }
             else -> {
-                Log.d("BILLING", "Connection failed: " + (billingResult?.responseCode).toString())
+                Timber.e(
+                    "Billing connection failed. Unknown response: %s",
+                    (billingResult?.responseCode).toString()
+                )
             }
         }
     }
 
     override fun onPurchasesUpdated(result: BillingResult?, data: MutableList<Purchase>?) {
-        Log.d("BILLING", "onPurchaseUpdated:$result:$data")
+        Timber.v("onPurchasesUpdated:$result:$data")
     }
 
     override fun onSkuDetailsResponse(result: BillingResult?, data: MutableList<SkuDetails>?) {
@@ -90,11 +98,11 @@ class FreemiumHelper(private val context: Context, private val premiumSku: Strin
                     premiumSkuDetails = skuDetails
                 }
             }
-            Log.d("SKU", "Data: $data")
+            Timber.d("SKU data result: $data")
         } else {
-            Log.d("SKU", "onSkuDetailsResponse response: ${result?.responseCode}")
+            Timber.d("onSkuDetailsResponse fail. responseCode: ${result?.responseCode}")
         }
 
-        Log.d("mysku", premiumSkuDetails.toString())
+        Timber.d("Sku result: $premiumSkuDetails")
     }
 }
