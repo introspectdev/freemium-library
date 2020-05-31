@@ -21,7 +21,7 @@ class FreemiumHelper(context: Context, private val premiumSku: String) :
     var isAvailable = true
 
     // From our check if it's a premium version or not. Just saying no for now until we get the rest working.
-    val isPremium get() = false
+    val isPremium get() = true
 
     init {
         if (BuildConfig.DEBUG) {
