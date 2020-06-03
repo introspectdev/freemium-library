@@ -64,7 +64,6 @@ class Freemium(activity: Activity, private val premiumSku: String) {
             if (it?.sku == premiumSku) {
                 premiumInventory = it
                 _isAvailable = true
-                Timber.d("premiumInventory saved")
             }
 
             checkPurchased()
@@ -91,15 +90,10 @@ class Freemium(activity: Activity, private val premiumSku: String) {
                     // handle premium sku ourselves
                     if (purchase.sku == premiumSku) {
                         billing.acknowledgePurchase(purchase).subscribe({
-                                                                            if (it != BillingResponse.OK) {
-                                                                                // Should we do something here?
-                                                                                Timber.d(
-                                                                                        "Acknowledge response code: %d",
-                                                                                        it
-                                                                                )
-                                                                            } else {
+                                                                            if (it == BillingResponse.OK) {
                                                                                 makePremium(purchase.purchaseToken)
                                                                             }
+                                                                            // Should we do something here for other responses?
                                                                         }, {
                                                                             Timber.w(it)
                                                                         })
@@ -146,10 +140,12 @@ class Freemium(activity: Activity, private val premiumSku: String) {
      * Initiate the purchase of the premium version
      *
      * @param[observer] observer object to handle callbacks
+     * @return false if information is still being loaded from the Play Store
      */
-    fun purchasePremium(observer: SingleObserver<BillingResult>) {
+    fun purchasePremium(observer: SingleObserver<BillingResult>) : Boolean {
         if (premiumInventory == null) {
             Timber.w("Cannot initiate purchase yet.")
+            return false
         }
 
         premiumInventory?.let { it ->
@@ -158,6 +154,7 @@ class Freemium(activity: Activity, private val premiumSku: String) {
                     .subscribeOn(Schedulers.io())
                     .subscribe(observer)
         }
+        return true
     }
 
     /**
