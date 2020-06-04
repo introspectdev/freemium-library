@@ -6,38 +6,31 @@ package ml.introspectsoft.freemium_library
 
 import android.app.Activity
 import com.android.billingclient.api.BillingClient
+import com.android.billingclient.api.BillingClient.BillingResponseCode
 import com.android.billingclient.api.BillingResult
 import com.android.billingclient.api.Purchase
-import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
-import io.reactivex.rxjava3.annotations.NonNull
-import io.reactivex.rxjava3.core.SingleObserver
-import io.reactivex.rxjava3.disposables.Disposable
-import io.reactivex.rxjava3.schedulers.Schedulers
-import io.reactivex.rxjava3.subjects.PublishSubject
-import io.reactivex.rxjava3.subjects.ReplaySubject
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.launch
-import ml.introspectsoft.rxbilling.BillingResponse
-import ml.introspectsoft.rxbilling.Inventory
-import ml.introspectsoft.rxbilling.PurchasesUpdate
-import ml.introspectsoft.rxbilling.RxBilling
+import com.android.billingclient.api.SkuDetails
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.BroadcastChannel
+import kotlinx.coroutines.channels.ConflatedBroadcastChannel
+import kotlinx.coroutines.channels.receiveOrNull
+import ml.introspectsoft.cobilling.CoBilling
 import timber.log.Timber
 
-class Freemium(activity: Activity, private val premiumSku: String) {
-    private var purchaseSubscription: Disposable? = null
-    private var premiumInventory: Inventory? = null
+class Freemium(
+        activity: Activity, private val premiumSku: String, useScope: CoroutineScope? = null
+) {
 
-    private var billing = RxBilling(activity)
+    private var premiumItem: SkuDetails? = null
+    private var testItem: SkuDetails? = null
+    private val testSku = "test_item"
+
+    private var billing = CoBilling(activity)
     private var prefs = FreemiumPreference(activity.applicationContext)
 
     private var _isAvailable = false
 
-    /**
-     * Notification of change to isPremium. Only triggered when it becomes true.
-     */
-    val premiumChanged: @NonNull PublishSubject<Boolean> = PublishSubject.create()
+    private val scope = useScope ?: MainScope()
 
     /**
      * Is the purchase button available
@@ -50,96 +43,123 @@ class Freemium(activity: Activity, private val premiumSku: String) {
     val isPremium get() = prefs.isPremium
 
     /**
+     * Notification of change to isPremium. Only triggered when it becomes true.
+     */
+    val premiumChanged: BroadcastChannel<Boolean> = ConflatedBroadcastChannel()
+
+    /**
      * onNewPurchase(purchase)
      */
-    val newPurchase: @NonNull ReplaySubject<Purchase> = ReplaySubject.create<Purchase>()
+    val newPurchase: BroadcastChannel<Purchase> = BroadcastChannel(CoBilling.BUFFER_SIZE)
 
     /**
      * onPendingPurchase(purchase)
      */
-    val pendingPurchase: @NonNull ReplaySubject<Purchase> = ReplaySubject.create<Purchase>()
+    val pendingPurchase: BroadcastChannel<Purchase> = BroadcastChannel(CoBilling.BUFFER_SIZE)
 
     init {
-        // Start listening for purchase changes
-        purchaseSubscription =
-                billing.purchasesUpdated.subscribe { updates -> onPurchasesUpdated(updates) }
-
-        // I'm *sure* this is the wrong scope.
-        MainScope().launch(Dispatchers.IO, CoroutineStart.DEFAULT) {
-            billing.queryInAppPurchases(premiumSku).subscribe {
-                if (it?.sku == premiumSku) {
-                    premiumInventory = it
-                    _isAvailable = true
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                val receiver = billing.purchasesUpdated.openSubscription()
+                launch(Dispatchers.IO, CoroutineStart.DEFAULT) {
+                    while (!receiver.isClosedForReceive) {
+                        val purchases = receiver.receiveOrNull()
+                        if (purchases == null) {
+                            cancel()
+                        }
+                        purchases?.let { onPurchasesUpdated(it) }
+                    }
                 }
 
-                checkPurchased()
+                // check if we're paid for
+                if (!isPremium) {
+                    checkPurchased()
+                }
 
-                // Query for existing purchases for INAPP
+                // Trigger processing of pending new purchases
                 billing.checkPurchases(BillingClient.SkuType.INAPP)
             }
         }
     }
 
-    private fun onPurchasesUpdated(update: PurchasesUpdate) {
-        if (update.result.responseCode != BillingResponse.OK) {
+    private suspend fun onPurchasesUpdated(update: Purchase.PurchasesResult) {
+        if (update.billingResult.responseCode != BillingResponseCode.OK) {
             Timber.d(
-                    "Something probably went wrong. ResponseCode: %d, Purchases count: %d",
-                    update.result.responseCode,
-                    update.purchases?.count()
+                    "onPurchasesUpdated: Something probably went wrong. ResponseCode: %d, Purchases count: %d",
+                    update.billingResult.responseCode,
+                    update.purchasesList?.size
             )
             return
         }
 
-        update.purchases?.forEach { purchase ->
+        update.purchasesList?.forEach { purchase ->
             if (!purchase.isAcknowledged) {
                 if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
                     // handle premium sku ourselves
-                    if (purchase.sku == premiumSku) {
-                        billing.acknowledgePurchase(purchase).subscribe({
-                                                                            if (it == BillingResponse.OK) {
-                                                                                makePremium(purchase.purchaseToken)
-                                                                            }
-                                                                            // Should we do something here for other responses?
-                                                                        }, {
-                                                                            Timber.w(it)
-                                                                        })
-                    } else {
-                        // Process any other new purchase in the app
-                        newPurchase.onNext(purchase)
+                    when (purchase.sku) {
+                        premiumSku -> {
+                            val result = billing.acknowledgePurchase(purchase)
+                            if (result.responseCode == BillingResponseCode.OK) {
+                                makePremium(purchase.purchaseToken)
+                            } else {
+                                Timber.d("acknowledge fail: %d", result.responseCode)
+                            }
+                        }
+                        testSku    -> {
+                            val result = billing.consumePurchase(purchase)
+                            if (result.billingResult.responseCode == BillingResponseCode.OK) {
+                                Timber.d("Consumed: %s", result.purchaseToken)
+                            } else {
+                                Timber.d("Consume failed: %d", result.billingResult.responseCode)
+                            }
+                        }
+                        else       -> {
+                            // Process any other new purchase in the app
+                            newPurchase.send(purchase)
+                        }
                     }
                 }
                 if (purchase.purchaseState == Purchase.PurchaseState.PENDING) {
                     // Informational pending purchase notification
-                    pendingPurchase.onNext(purchase)
+                    pendingPurchase.send(purchase)
                 }
             } else {
                 // possibly redundant checks, but...
                 if (purchase.sku == premiumSku && purchase.purchaseState == Purchase.PurchaseState.PURCHASED && purchase.isAcknowledged) {
+
                     makePremium(purchase.purchaseToken)
                 }
             }
         }
     }
 
-    private fun makePremium(tokenString: String) {
+    private suspend fun makePremium(tokenString: String) {
         prefs.save(tokenString)
-        premiumChanged.onNext(isPremium)
+        premiumChanged.offer(isPremium)
     }
 
-    private fun checkPurchased() {
-        billing.purchasedInApps.subscribe({
-                                              if (it.purchaseState == Purchase.PurchaseState.PURCHASED && it.productId == premiumSku) {
-                                                  // Should eventually add some validation to verify the user really purchased it somehow
-                                                  if (!isPremium) {
-                                                      makePremium(it.purchaseToken)
-                                                  }
-                                              }
-                                              // Ignore any other returned purchases
+    private suspend fun checkPurchased() {
+        scope.launch(Dispatchers.IO, CoroutineStart.DEFAULT) {
+            while (true) {
+                val purchased = billing.getPurchasedInApps()
+                if (purchased.billingResult.responseCode == BillingResponseCode.OK) {
+                    purchased.purchasesList.forEach {
+                        if (it.purchaseState == Purchase.PurchaseState.PURCHASED && it.sku == premiumSku) {
+                            // Should eventually add some validation to verify the user really purchased it somehow
+                            if (!isPremium) {
+                                makePremium(it.purchaseToken)
+                            }
+                        }
+                    }
 
-                                          }, {
-                                              // Something went wrong
-                                              Timber.w(it)
-                                          })
+                    // cancel because we got a response
+                    cancel()
+                }
+
+                // Run again in 5 minutes
+                delay(5 * 60 * 1000)
+            }
+        }
     }
 
     /**
@@ -148,29 +168,75 @@ class Freemium(activity: Activity, private val premiumSku: String) {
      * @param[observer] observer object to handle callbacks
      * @return false if information is still being loaded from the Play Store
      */
-    fun purchasePremium(observer: SingleObserver<BillingResult>): Boolean {
-        if (premiumInventory == null) {
-            Timber.w("Cannot initiate purchase yet.")
-            return false
+    suspend fun purchasePremium(): BillingResult {
+        // first check, then query
+        if (premiumItem == null) {
+            val search = billing.queryInAppPurchases(premiumSku)
+            search.skuDetailsList?.forEach {
+                if (it.sku == premiumSku) {
+                    premiumItem = it
+                    _isAvailable = true
+                }
+            }
+        }
+        // second check
+        if (premiumItem == null) {
+            Timber.w("Cannot initiate purchase yet. no item found")
+            return BillingResult.newBuilder().setResponseCode(-1).build()
         }
 
-        premiumInventory?.let { it ->
-            billing.purchase(it)
-                    .observeOn(AndroidSchedulers.mainThread())
-                    .subscribeOn(Schedulers.io())
-                    .subscribe(observer)
+        premiumItem?.let {
+            val result = billing.purchase(it)
+            return result
         }
-        return true
+
+        Timber.wtf("purchasePremium() This code should not be reached.")
+
+        // This should never be reached
+        return BillingResult.newBuilder()
+                .setResponseCode(BillingResponseCode.DEVELOPER_ERROR)
+                .build()
+    }
+
+    suspend fun purchaseTest(): BillingResult {
+        // first check, then query
+        if (testItem == null) {
+            val search = billing.queryInAppPurchases(testSku)
+            search.skuDetailsList?.forEach {
+                if (it.sku == testSku) {
+                    testItem = it
+                    _isAvailable = true
+                }
+            }
+        }
+        // second check
+        if (testItem == null) {
+            Timber.w("Cannot initiate purchase yet. no item found")
+            return BillingResult.newBuilder().setResponseCode(-1).build()
+        }
+
+        testItem?.let {
+            val result = billing.purchase(it)
+            return result
+        }
+
+        Timber.wtf("purchaseTest() This code should not be reached.")
+
+        // This should never be reached
+        return BillingResult.newBuilder()
+                .setResponseCode(BillingResponseCode.DEVELOPER_ERROR)
+                .build()
     }
 
     /**
      * Cleanup listeners and objects
      */
-    fun destroy() {
-        if (purchaseSubscription != null && purchaseSubscription?.isDisposed == false) {
-            purchaseSubscription?.dispose()
-        }
+    fun close() {
+        newPurchase.close()
+        pendingPurchase.close()
+        premiumChanged.close()
+
         prefs.destroy()
-        billing.destroy()
+        billing.close()
     }
 }
