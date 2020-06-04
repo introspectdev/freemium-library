@@ -15,6 +15,10 @@ import io.reactivex.rxjava3.disposables.Disposable
 import io.reactivex.rxjava3.schedulers.Schedulers
 import io.reactivex.rxjava3.subjects.PublishSubject
 import io.reactivex.rxjava3.subjects.ReplaySubject
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
 import ml.introspectsoft.rxbilling.BillingResponse
 import ml.introspectsoft.rxbilling.Inventory
 import ml.introspectsoft.rxbilling.PurchasesUpdate
@@ -60,18 +64,20 @@ class Freemium(activity: Activity, private val premiumSku: String) {
         purchaseSubscription =
                 billing.purchasesUpdated.subscribe { updates -> onPurchasesUpdated(updates) }
 
-        billing.queryInAppPurchases(premiumSku).subscribe {
-            if (it?.sku == premiumSku) {
-                premiumInventory = it
-                _isAvailable = true
+        // I'm *sure* this is the wrong scope.
+        MainScope().launch(Dispatchers.IO, CoroutineStart.DEFAULT) {
+            billing.queryInAppPurchases(premiumSku).subscribe {
+                if (it?.sku == premiumSku) {
+                    premiumInventory = it
+                    _isAvailable = true
+                }
+
+                checkPurchased()
+
+                // Query for existing purchases for INAPP
+                billing.checkPurchases(BillingClient.SkuType.INAPP)
             }
-
-            checkPurchased()
-
-            // Query for existing purchases for INAPP
-            billing.checkPurchases(BillingClient.SkuType.INAPP)
         }
-
     }
 
     private fun onPurchasesUpdated(update: PurchasesUpdate) {
@@ -142,7 +148,7 @@ class Freemium(activity: Activity, private val premiumSku: String) {
      * @param[observer] observer object to handle callbacks
      * @return false if information is still being loaded from the Play Store
      */
-    fun purchasePremium(observer: SingleObserver<BillingResult>) : Boolean {
+    fun purchasePremium(observer: SingleObserver<BillingResult>): Boolean {
         if (premiumInventory == null) {
             Timber.w("Cannot initiate purchase yet.")
             return false

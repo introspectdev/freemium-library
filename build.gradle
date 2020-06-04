@@ -39,6 +39,7 @@ dependencies {
     implementation 'io.reactivex.rxjava3:rxandroid:3.0.0'
     implementation 'io.reactivex.rxjava3:rxjava:3.0.4'
     implementation 'io.reactivex.rxjava3:rxkotlin:3.0.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.3.0-alpha03'
     //implementation files('../../RxBilling2/builds/outputs/aar/rxbilling-debug.aar')
     //implementation files('../../RxBilling2/builds/outputs/aar/rxbilling-release.aar')
     implementation 'ml.introspectsoft.rxbilling:rxbilling2:0.2.1-experimental'
