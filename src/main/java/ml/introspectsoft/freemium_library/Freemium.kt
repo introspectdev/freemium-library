@@ -165,7 +165,6 @@ class Freemium(
     /**
      * Initiate the purchase of the premium version
      *
-     * @param[observer] observer object to handle callbacks
      * @return false if information is still being loaded from the Play Store
      */
     suspend fun purchasePremium(): BillingResult {
