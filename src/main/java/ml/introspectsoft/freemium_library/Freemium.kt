@@ -92,42 +92,45 @@ class Freemium(
             return
         }
 
-        update.purchasesList?.forEach { purchase ->
-            if (!purchase.isAcknowledged) {
-                if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
-                    // handle premium sku ourselves
-                    when (purchase.sku) {
-                        premiumSku -> {
-                            val result = billing.acknowledgePurchase(purchase)
-                            if (result.responseCode == BillingResponseCode.OK) {
-                                makePremium(purchase.purchaseToken)
-                            } else {
-                                Timber.d("acknowledge fail: %d", result.responseCode)
-                            }
-                        }
-                        testSku    -> {
-                            val result = billing.consumePurchase(purchase)
-                            if (result.billingResult.responseCode == BillingResponseCode.OK) {
-                                Timber.d("Consumed: %s", result.purchaseToken)
-                            } else {
-                                Timber.d("Consume failed: %d", result.billingResult.responseCode)
-                            }
-                        }
-                        else       -> {
-                            // Process any other new purchase in the app
-                            newPurchase.send(purchase)
-                        }
-                    }
-                }
-                if (purchase.purchaseState == Purchase.PurchaseState.PENDING) {
-                    // Informational pending purchase notification
-                    pendingPurchase.send(purchase)
-                }
-            } else {
+        update.purchasesList.orEmpty().forEach { purchase ->
+            if (purchase.isAcknowledged) {
                 // possibly redundant checks, but...
                 if (purchase.sku == premiumSku && purchase.purchaseState == Purchase.PurchaseState.PURCHASED && purchase.isAcknowledged) {
 
                     makePremium(purchase.purchaseToken)
+                }
+                return@forEach
+            }
+
+            if (purchase.purchaseState == Purchase.PurchaseState.PENDING) {
+                // Informational pending purchase notification
+                pendingPurchase.send(purchase)
+                return@forEach
+            }
+
+            if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
+                // handle premium sku ourselves
+                when (purchase.sku) {
+                    premiumSku -> {
+                        val result = billing.acknowledgePurchase(purchase)
+                        if (result.responseCode == BillingResponseCode.OK) {
+                            makePremium(purchase.purchaseToken)
+                        } else {
+                            Timber.d("acknowledge fail: %d", result.responseCode)
+                        }
+                    }
+                    testSku    -> {
+                        val result = billing.consumePurchase(purchase)
+                        if (result.billingResult.responseCode == BillingResponseCode.OK) {
+                            Timber.d("Consumed: %s", result.purchaseToken)
+                        } else {
+                            Timber.d("Consume failed: %d", result.billingResult.responseCode)
+                        }
+                    }
+                    else       -> {
+                        // Process any other new purchase in the app
+                        newPurchase.send(purchase)
+                    }
                 }
             }
         }
@@ -143,7 +146,7 @@ class Freemium(
             while (true) {
                 val purchased = billing.getPurchasedInApps()
                 if (purchased.billingResult.responseCode == BillingResponseCode.OK) {
-                    purchased.purchasesList.forEach {
+                    purchased.purchasesList.forEach { it ->
                         if (it.purchaseState == Purchase.PurchaseState.PURCHASED && it.sku == premiumSku) {
                             // Should eventually add some validation to verify the user really purchased it somehow
                             if (!isPremium) {
@@ -171,7 +174,7 @@ class Freemium(
         // first check, then query
         if (premiumItem == null) {
             val search = billing.queryInAppPurchases(premiumSku)
-            search.skuDetailsList?.forEach {
+            search.skuDetailsList.orEmpty().forEach {
                 if (it.sku == premiumSku) {
                     premiumItem = it
                     _isAvailable = true
@@ -185,8 +188,7 @@ class Freemium(
         }
 
         premiumItem?.let {
-            val result = billing.purchase(it)
-            return result
+            return billing.purchase(it)
         }
 
         Timber.wtf("purchasePremium() This code should not be reached.")
@@ -201,7 +203,7 @@ class Freemium(
         // first check, then query
         if (testItem == null) {
             val search = billing.queryInAppPurchases(testSku)
-            search.skuDetailsList?.forEach {
+            search.skuDetailsList.orEmpty().forEach {
                 if (it.sku == testSku) {
                     testItem = it
                     _isAvailable = true
@@ -215,8 +217,7 @@ class Freemium(
         }
 
         testItem?.let {
-            val result = billing.purchase(it)
-            return result
+            return billing.purchase(it)
         }
 
         Timber.wtf("purchaseTest() This code should not be reached.")
