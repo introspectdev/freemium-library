@@ -37,7 +37,8 @@ dependencies {
     implementation 'com.android.billingclient:billing-ktx:2.2.1'
     implementation 'com.jakewharton.timber:timber:4.7.1'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.3.0-alpha03'
-    implementation files('../../RxBilling2/cobilling/build/outputs/aar/cobilling-debug.aar')
+    //implementation 'ml.introspectsoft.cobilling:cobilling:0.3.1-alpha'
+    implementation files("../../cobilling/builds/outputs/maven-repo/ml/introspectsoft/cobilling/cobilling/0.3.1-alpha/cobilling-0.3.1-alpha.aar")
 
     testImplementation 'junit:junit:4.13'
     androidTestImplementation 'androidx.test.ext:junit:1.1.1'
