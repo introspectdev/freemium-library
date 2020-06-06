@@ -146,7 +146,7 @@ class Freemium(
             while (true) {
                 val purchased = billing.getPurchasedInApps()
                 if (purchased.billingResult.responseCode == BillingResponseCode.OK) {
-                    purchased.purchasesList.forEach { it ->
+                    purchased.purchasesList.orEmpty().forEach { it ->
                         if (it.purchaseState == Purchase.PurchaseState.PURCHASED && it.sku == premiumSku) {
                             // Should eventually add some validation to verify the user really purchased it somehow
                             if (!isPremium) {
